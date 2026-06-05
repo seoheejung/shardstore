@@ -1,0 +1,30 @@
+# Go build output
+bin/
+*.exe
+*.test
+*.out
+
+# Runtime storage
+data/*
+!data/.gitkeep
+
+# Local test files
+testdata/*
+!testdata/.gitkeep
+
+# FTP exercise files
+ftp-data/*
+!ftp-data/.gitkeep
+
+# Node.js
+node_modules/
+dist/
+
+# Env
+.env
+.env.*
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
