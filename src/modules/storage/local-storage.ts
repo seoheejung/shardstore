@@ -16,8 +16,19 @@ export class LocalStorage {
     return path.join(this.bucketsPath(), bucketName);
   }
 
-  objectDataPath(bucketName: string, objectId: string) {
-    return path.join(this.bucketPath(bucketName), "objects", `${objectId}.data`);
+  objectShardDirectoryPath(bucketName: string, objectId: string) {
+    return path.join(this.bucketPath(bucketName), "shards", objectId);
+  }
+
+  objectShardDataPath(bucketName: string, objectId: string, shardIndex: number) {
+    return path.join(
+      this.objectShardDirectoryPath(bucketName, objectId),
+      `shard_${shardIndex}.data`
+    );
+  }
+
+  objectShardStoragePath(objectId: string, shardIndex: number) {
+    return path.posix.join("shards", objectId, `shard_${shardIndex}.data`);
   }
 
   objectMetadataPath(bucketName: string, objectId: string) {
@@ -34,7 +45,7 @@ export class LocalStorage {
   }
 
   async ensureBucket(bucketName: string) {
-    await mkdir(path.join(this.bucketPath(bucketName), "objects"), {
+    await mkdir(path.join(this.bucketPath(bucketName), "shards"), {
       recursive: true
     });
     await mkdir(path.join(this.bucketPath(bucketName), "metadata", "objects"), {
@@ -51,16 +62,27 @@ export class LocalStorage {
       .sort();
   }
 
-  async writeObjectData(bucketName: string, objectId: string, data: Buffer) {
-    await writeFile(this.objectDataPath(bucketName, objectId), data);
+  async writeObjectShard(
+    bucketName: string,
+    objectId: string,
+    shardIndex: number,
+    data: Buffer
+  ) {
+    await mkdir(this.objectShardDirectoryPath(bucketName, objectId), {
+      recursive: true
+    });
+    await writeFile(this.objectShardDataPath(bucketName, objectId, shardIndex), data);
   }
 
-  async readObjectData(bucketName: string, objectId: string) {
-    return readFile(this.objectDataPath(bucketName, objectId));
+  async readObjectShard(bucketName: string, objectId: string, shardIndex: number) {
+    return readFile(this.objectShardDataPath(bucketName, objectId, shardIndex));
   }
 
-  async deleteObjectData(bucketName: string, objectId: string) {
-    await rm(this.objectDataPath(bucketName, objectId), { force: true });
+  async deleteObjectShards(bucketName: string, objectId: string) {
+    await rm(this.objectShardDirectoryPath(bucketName, objectId), {
+      recursive: true,
+      force: true
+    });
   }
 
   async deleteObjectMetadata(bucketName: string, objectId: string) {

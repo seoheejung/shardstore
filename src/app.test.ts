@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { AddressInfo } from "node:net";
@@ -28,10 +28,10 @@ async function withServer(
 }
 
 test("bucket and object APIs store, verify, list, download, and delete objects", async () => {
-  await withServer(async (baseUrl) => {
+  await withServer(async (baseUrl, dataRoot) => {
     const bucket = "photo-bucket";
     const key = "2026/05/sample.txt";
-    const body = Buffer.from("sample object body");
+    const body = Buffer.from("0123456789");
     const checksum = createHash("sha256").update(body).digest("hex");
 
     let response = await fetch(`${baseUrl}/buckets/${bucket}`, {
@@ -82,9 +82,51 @@ test("bucket and object APIs store, verify, list, download, and delete objects",
     );
     assert.equal(response.status, 200);
     const metadata = await response.json();
-    assert.equal(metadata.schema_version, 1);
+    assert.equal(metadata.schema_version, 2);
     assert.equal(metadata.object_id, uploaded.object_id);
-    assert.equal(metadata.storage_path, `objects/${uploaded.object_id}.data`);
+    assert.equal(metadata.storage_type, "sharded");
+    assert.equal(metadata.shard_count, 3);
+    assert.equal(metadata.shards.length, 3);
+    assert.deepEqual(
+      metadata.shards.map((shard: { index: number }) => shard.index),
+      [0, 1, 2]
+    );
+    assert.deepEqual(
+      metadata.shards.map((shard: { size: number }) => shard.size),
+      [4, 3, 3]
+    );
+
+    const shardBuffers = await Promise.all(
+      metadata.shards.map(
+        async (shard: {
+          index: number;
+          path: string;
+          size: number;
+          checksum: string;
+        }) => {
+          assert.equal(
+            shard.path,
+            `shards/${uploaded.object_id}/shard_${shard.index}.data`
+          );
+          const shardData = await readFile(
+            path.join(dataRoot, "buckets", bucket, shard.path)
+          );
+          assert.equal(shardData.length, shard.size);
+          assert.equal(
+            createHash("sha256").update(shardData).digest("hex"),
+            shard.checksum
+          );
+          return shardData;
+        }
+      )
+    );
+    assert.equal(Buffer.concat(shardBuffers).toString(), body.toString());
+    assert.equal(
+      await pathExists(
+        path.join(dataRoot, "buckets", bucket, "objects", `${uploaded.object_id}.data`)
+      ),
+      false
+    );
 
     response = await fetch(`${baseUrl}/buckets/${bucket}/objects`);
     assert.equal(response.status, 200);
@@ -112,6 +154,12 @@ test("bucket and object APIs store, verify, list, download, and delete objects",
     );
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { deleted: true, bucket, key });
+    assert.equal(
+      await pathExists(
+        path.join(dataRoot, "buckets", bucket, "shards", uploaded.object_id)
+      ),
+      false
+    );
 
     response = await fetch(
       `${baseUrl}/buckets/${bucket}/objects/metadata?key=${encodeURIComponent(
@@ -147,8 +195,11 @@ test("download refuses data when stored checksum no longer matches metadata", as
       `${uploaded.object_id}.json`
     );
     const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+    const firstShard = metadata.shards.find(
+      (shard: { index: number }) => shard.index === 0
+    );
     await writeFile(
-      path.join(dataRoot, "buckets", bucket, metadata.storage_path),
+      path.join(dataRoot, "buckets", bucket, firstShard.path),
       "corrupted"
     );
 
@@ -159,6 +210,27 @@ test("download refuses data when stored checksum no longer matches metadata", as
     assert.equal((await response.json()).error.code, "checksum_mismatch");
   });
 });
+
+async function pathExists(filePath: string) {
+  try {
+    await access(filePath);
+    return true;
+  } catch (error) {
+    if (isNotFound(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function isNotFound(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
+}
 
 test("unsafe bucket names and missing upload fields return JSON errors", async () => {
   await withServer(async (baseUrl) => {
