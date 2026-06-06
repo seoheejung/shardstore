@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { sha256 } from "../checksum/sha256";
 import { MetadataRepository } from "../metadata/metadata.repository";
 import { ObjectMetadata } from "../metadata/metadata.types";
+import { ShardService, SHARD_COUNT } from "../shard/shard.service";
 import { LocalStorage } from "../storage/local-storage";
 import { AppError } from "../../shared/errors";
 import { requireObjectKey, validateBucketName } from "../../shared/validation";
@@ -19,7 +20,8 @@ export class ObjectService {
   constructor(
     private readonly bucketService: BucketService,
     private readonly storage: LocalStorage,
-    private readonly metadataRepository: MetadataRepository
+    private readonly metadataRepository: MetadataRepository,
+    private readonly shardService: ShardService = new ShardService(storage)
   ) {}
 
   async upload(bucketName: string, rawKey: unknown, file?: UploadedFile) {
@@ -37,25 +39,27 @@ export class ObjectService {
 
     const objectId = randomUUID();
     const checksum = sha256(file.buffer);
-    const metadata: ObjectMetadata = {
-      schema_version: 1,
-      object_id: objectId,
-      bucket,
-      key,
-      original_file_name: file.originalname,
-      content_type: file.mimetype || "application/octet-stream",
-      size: file.size,
-      checksum,
-      storage_path: `objects/${objectId}.data`,
-      created_at: new Date().toISOString()
-    };
-
-    await this.storage.writeObjectData(bucket, objectId, file.buffer);
 
     try {
+      const shards = await this.shardService.writeShards(bucket, objectId, file.buffer);
+      const metadata: ObjectMetadata = {
+        schema_version: 2,
+        object_id: objectId,
+        bucket,
+        key,
+        original_file_name: file.originalname,
+        content_type: file.mimetype || "application/octet-stream",
+        size: file.size,
+        checksum,
+        storage_type: "sharded",
+        shard_count: SHARD_COUNT,
+        shards,
+        created_at: new Date().toISOString()
+      };
+
       await this.metadataRepository.save(metadata);
     } catch (error) {
-      await this.storage.deleteObjectData(bucket, objectId);
+      await this.storage.deleteObjectShards(bucket, objectId);
       throw error;
     }
 
@@ -63,7 +67,7 @@ export class ObjectService {
       object_id: objectId,
       bucket,
       key,
-      size: metadata.size,
+      size: file.size,
       checksum
     };
   }
@@ -83,9 +87,10 @@ export class ObjectService {
 
   async download(bucketName: string, rawKey: unknown) {
     const metadata = await this.getMetadata(bucketName, rawKey);
-    const data = await this.storage.readObjectData(
+    const data = await this.shardService.readShards(
       metadata.bucket,
-      metadata.object_id
+      metadata.object_id,
+      metadata.shards
     );
 
     if (sha256(data) !== metadata.checksum) {
@@ -117,7 +122,7 @@ export class ObjectService {
 
   async delete(bucketName: string, rawKey: unknown) {
     const metadata = await this.getMetadata(bucketName, rawKey);
-    await this.storage.deleteObjectData(metadata.bucket, metadata.object_id);
+    await this.storage.deleteObjectShards(metadata.bucket, metadata.object_id);
     await this.storage.deleteObjectMetadata(metadata.bucket, metadata.object_id);
 
     return {
