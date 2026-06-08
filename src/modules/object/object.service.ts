@@ -3,7 +3,13 @@ import { randomUUID } from "crypto";
 import { sha256 } from "../checksum/sha256";
 import { MetadataRepository } from "../metadata/metadata.repository";
 import { ObjectMetadata } from "../metadata/metadata.types";
-import { ShardService, SHARD_COUNT } from "../shard/shard.service";
+import {
+  DATA_SHARDS,
+  PARITY_SHARDS,
+  RECOVERABLE_SHARD_LOSS,
+  ShardService,
+  TOTAL_SHARDS
+} from "../shard/shard.service";
 import { LocalStorage } from "../storage/local-storage";
 import { AppError } from "../../shared/errors";
 import { requireObjectKey, validateBucketName } from "../../shared/validation";
@@ -43,7 +49,7 @@ export class ObjectService {
     try {
       const shards = await this.shardService.writeShards(bucket, objectId, file.buffer);
       const metadata: ObjectMetadata = {
-        schema_version: 2,
+        schema_version: 3,
         object_id: objectId,
         bucket,
         key,
@@ -51,8 +57,14 @@ export class ObjectService {
         content_type: file.mimetype || "application/octet-stream",
         size: file.size,
         checksum,
-        storage_type: "sharded",
-        shard_count: SHARD_COUNT,
+        storage_type: "erasure_coded",
+        coding: {
+          algorithm: "reed-solomon",
+          data_shards: DATA_SHARDS,
+          parity_shards: PARITY_SHARDS,
+          total_shards: TOTAL_SHARDS,
+          recoverable_shard_loss: RECOVERABLE_SHARD_LOSS
+        },
         shards,
         created_at: new Date().toISOString()
       };
@@ -87,11 +99,7 @@ export class ObjectService {
 
   async download(bucketName: string, rawKey: unknown) {
     const metadata = await this.getMetadata(bucketName, rawKey);
-    const data = await this.shardService.readShards(
-      metadata.bucket,
-      metadata.object_id,
-      metadata.shards
-    );
+    const data = await this.shardService.readObject(metadata);
 
     if (sha256(data) !== metadata.checksum) {
       throw new AppError(
