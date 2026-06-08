@@ -46,6 +46,23 @@ export class MetadataRepository {
     return metadata.find((item) => item.key === key) ?? null;
   }
 
+  async findByObjectId(objectId: string) {
+    const buckets = await this.storage.listBuckets();
+
+    for (const bucketName of buckets) {
+      try {
+        return await this.readByObjectId(bucketName, objectId);
+      } catch (error) {
+        if (isNotFound(error)) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    return null;
+  }
+
   async readByObjectId(bucketName: string, objectId: string) {
     return this.readFile(this.storage.objectMetadataPath(bucketName, objectId));
   }

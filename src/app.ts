@@ -2,6 +2,7 @@ import express, { ErrorRequestHandler } from "express";
 import multer from "multer";
 
 import { createBucketRouter } from "./routes/bucket.routes";
+import { createDebugRouter } from "./routes/debug.routes";
 import { createObjectRouter } from "./routes/object.routes";
 import { AppError } from "./shared/errors";
 
@@ -15,6 +16,7 @@ export function createApp(options: AppOptions = {}) {
   app.use(express.json());
   app.use("/buckets", createObjectRouter(options));
   app.use("/buckets", createBucketRouter(options));
+  app.use("/debug", createDebugRouter(options));
 
   app.use((_req, _res, next) => {
     next(new AppError(404, "not_found", "Route not found"));
@@ -30,7 +32,8 @@ const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
     res.status(error.statusCode).json({
       error: {
         code: error.code,
-        message: error.message
+        message: error.message,
+        ...error.details
       }
     });
     return;
