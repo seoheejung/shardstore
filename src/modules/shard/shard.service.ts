@@ -65,6 +65,16 @@ export class ShardService {
   }
 
   async readObject(metadata: ObjectMetadata) {
+    try {
+      // Normal downloads stay on the hot data tier; cold parity is only needed
+      // when a data shard is actually missing and recovery is required.
+      return await this.readDataShards(metadata);
+    } catch (error) {
+      if (!isNotFound(error)) {
+        throw error;
+      }
+    }
+
     await this.recoverMissingShards(metadata);
     return this.readDataShards(metadata);
   }
