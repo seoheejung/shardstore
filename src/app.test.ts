@@ -323,6 +323,48 @@ test("download refuses data when stored checksum no longer matches metadata", as
   });
 });
 
+test("normal download reads hot data shards without requiring cold parity", async () => {
+  await withServer(async (baseUrl, dataRoot) => {
+    const bucket = "tier-bucket";
+    const key = "hot-download.bin";
+    const body = Buffer.from("hot data shards are enough for normal reads");
+
+    await fetch(`${baseUrl}/buckets/${bucket}`, { method: "PUT" });
+
+    const form = new FormData();
+    form.set("file", new Blob([body]), "hot-download.bin");
+    const uploadResponse = await fetch(
+      `${baseUrl}/buckets/${bucket}/objects?key=${encodeURIComponent(key)}`,
+      { method: "PUT", body: form }
+    );
+    const uploaded = await uploadResponse.json();
+
+    const metadataResponse = await fetch(
+      `${baseUrl}/buckets/${bucket}/objects/metadata?key=${encodeURIComponent(
+        key
+      )}`
+    );
+    const metadata = await metadataResponse.json();
+    const parityShard = metadata.shards.find(
+      (shard: { role: string }) => shard.role === "parity"
+    );
+    assert.ok(parityShard);
+
+    const parityPath = path.join(dataRoot, "buckets", bucket, parityShard.path);
+    await rm(parityPath, { force: true });
+    assert.equal(await pathExists(parityPath), false);
+
+    const response = await fetch(
+      `${baseUrl}/buckets/${bucket}/objects?key=${encodeURIComponent(key)}`
+    );
+    assert.equal(response.status, 200);
+    assert.equal(Buffer.from(await response.arrayBuffer()).toString(), body.toString());
+
+    assert.equal(await pathExists(parityPath), false);
+    assert.equal(uploaded.size, body.length);
+  });
+});
+
 test("recovery refuses objects with more missing shards than parity allows", async () => {
   await withServer(async (baseUrl) => {
     const bucket = "recovery-bucket";
