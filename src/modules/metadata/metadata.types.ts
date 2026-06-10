@@ -29,5 +29,7 @@ export interface ObjectMetadata {
   storage_type: "erasure_coded";
   coding: ObjectCodingMetadata;
   shards: ObjectShardMetadata[];
+  migrated_from_schema_version?: number;
+  migrated_at?: string;
   created_at: string;
 }

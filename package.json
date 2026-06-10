@@ -9,6 +9,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "cli": "tsx src/cli.ts",
+    "migration:metadata": "tsx src/modules/migration/metadata-migration.cli.ts",
     "test": "npm run build && node --test dist"
   },
   "dependencies": {
