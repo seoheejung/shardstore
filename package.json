@@ -9,6 +9,8 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "cli": "tsx src/cli.ts",
+    "ftp:server": "tsx experiments/ftp-socket/ftp-server.ts",
+    "ftp:client": "tsx experiments/ftp-socket/ftp-client.ts",
     "migration:metadata": "tsx src/modules/migration/metadata-migration.cli.ts",
     "test": "npm run build && node --test dist"
   },
